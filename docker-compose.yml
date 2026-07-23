@@ -1,0 +1,11 @@
+# Reproduction runs here and only here. Never on the production host, never on
+# the bare workstation — see codelift_spec.md 5-6.
+services:
+  lab:
+    build:
+      context: .
+    working_dir: /lab
+    volumes:
+      - ./work:/lab
+    tty: true
+    stdin_open: true

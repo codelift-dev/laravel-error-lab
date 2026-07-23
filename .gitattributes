@@ -1,0 +1,6 @@
+# Executed by bash inside a Linux container. A CRLF checkout on Windows makes
+# them fail with an unreadable "\r: command not found".
+*.sh        text eol=lf
+*.php       text eol=lf
+Dockerfile  text eol=lf
+*.yml       text eol=lf

@@ -74,9 +74,9 @@ docker compose run --rm lab bash vite-manifest-detail.sh  # exact exception text
 Nothing is installed on the host. The server and the client both run inside
 the container, so there are no port collisions and no host PHP involved.
 
-Verified against Laravel **13.21.1** on PHP **8.4.23**. Details and the
-harness bug that briefly produced two wrong conclusions:
-[VERIFICATION.md](VERIFICATION.md).
+Verified against Laravel **13.21.1** / PHP 8.4.23 (419) and Laravel **13.23.0**
+/ PHP 8.4.24 / Node 22.23.2 (Vite). Details, and the harness bug that briefly
+produced two wrong conclusions: [VERIFICATION.md](VERIFICATION.md).
 
 ---
 

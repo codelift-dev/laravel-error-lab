@@ -22,6 +22,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# Node is needed for the Vite scenarios: reproducing a manifest problem
+# honestly means running the real build, not hand-writing a manifest.json and
+# hoping it resembles one.
+ARG NODE_MAJOR=22
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /lab
 
 CMD ["bash"]

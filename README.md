@@ -41,12 +41,34 @@ as-is; `work/install-diagnosis.php` shows the registration.
 
 Full write-up: <https://codelift.lb-product.com/en/articles/laravel-419-page-expired-diagnosis>
 
+## `Vite manifest not found`
+
+Six cases, and the advice everyone gives — "run `npm run build`" — is the answer
+to exactly one of them. Two of the six **return HTTP 200 and throw nothing**:
+
+| Cause | HTTP | Exception |
+|---|---|---|
+| `public/build` deleted | 500 | `ViteManifestNotFoundException` |
+| **`public/hot` left behind** | **200** | **none** |
+| `public/hot` left behind, no build | **200** | **none** |
+| manifest only at `public/build/.vite/` | 500 | `ViteManifestNotFoundException` — *identical message* |
+| `@vite()` names a missing entry | 500 | `ViteException` |
+
+The hot-file case is the one that costs a day: the page renders, the status is
+200, the logs stay empty, and the browser is quietly told to fetch assets from
+a dev server that is not running. **`npm run build` does not remove
+`public/hot`** — measured, not assumed — so the standard advice cannot fix it.
+
+Full write-up: <https://codelift.lb-product.com/en/articles/laravel-vite-manifest-not-found>
+
 ## Run it
 
 ```bash
 docker compose build
-docker compose run --rm lab bash 419-page-expired.sh   # reproduce every cause
-docker compose run --rm lab bash 419-diagnose.sh       # classify every cause
+docker compose run --rm lab bash 419-page-expired.sh      # reproduce every 419 cause
+docker compose run --rm lab bash 419-diagnose.sh          # classify every 419 cause
+docker compose run --rm lab bash vite-manifest.sh         # reproduce every Vite case
+docker compose run --rm lab bash vite-manifest-detail.sh  # exact exception text
 ```
 
 Nothing is installed on the host. The server and the client both run inside

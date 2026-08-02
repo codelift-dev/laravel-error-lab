@@ -113,3 +113,111 @@ docker compose build
 docker compose run --rm lab bash 419-page-expired.sh   # Phase 1
 docker compose run --rm lab bash 419-diagnose.sh       # Phase 2
 ```
+
+
+---
+
+# Laravel `Vite manifest not found` 検証記録
+
+実施日: 2026-08-02
+実行環境: Docker Desktop / `php:8.4-cli-bookworm` + Node 22.23.2
+Laravel 13.23.0 / PHP 8.4.24
+
+**実際に `npm run build` を走らせている。** manifest.json を手書きして
+それらしく見せることはしていない。
+
+## 結果一覧
+
+| ケース | 変更点 | HTTP | 例外 |
+|---|---|---|---|
+| A | （正常系） | 200 | — |
+| B | `public/build` ごと削除 | 500 | `ViteManifestNotFoundException` |
+| C | **`public/hot` が残っている**（build はある） | **200** | **なし** |
+| D | `public/hot` が残っていて build も無い | **200** | **なし** |
+| E | manifest が `public/build/.vite/` にだけある | 500 | `ViteManifestNotFoundException` |
+| F | `@vite()` が manifest に無いエントリを参照 | 500 | `ViteException` |
+
+## 1. 例外は 2 種類ある
+
+同じ「manifest 関連」でも、投げられるクラスもメッセージも違う。
+
+**B / E:**
+```
+Illuminate\Foundation\ViteManifestNotFoundException
+Vite manifest not found at: /lab/vite-app/public/build/manifest.json
+```
+
+**F:**
+```
+Illuminate\Foundation\ViteException
+Unable to locate file in Vite manifest: resources/js/does-not-exist.js.
+```
+
+F は「manifest は読めたが、その中に指定のエントリが無い」。B/E とは対処が違う。
+
+## 2. B と E はメッセージが完全に同一
+
+E は manifest ファイル自体は存在する（`public/build/.vite/manifest.json`）。
+だが Laravel が見るのは `public/build/manifest.json` 固定なので、
+**「ファイルが無い」と全く同じエラーになる**。
+
+根拠（`Illuminate/Foundation/Vite.php`）:
+
+```
+56:  protected $manifestFilename = 'manifest.json';
+975: protected function manifestPath($buildDirectory)
+977:     return public_path($buildDirectory.'/'.$this->manifestFilename);
+```
+
+`laravel-vite-plugin` は manifest を `public/build/manifest.json` に配置する。
+素の Vite 設定で組んだ場合や、プラグインを外した場合に `.vite/` の下だけに
+出力されると、この状態になる。
+
+## 3. 最も厄介なのは C — エラーが出ない
+
+`public/hot` が残っていると、**HTTP 200 でページが返り、例外は一切出ない**。
+
+```
+served:
+  <script type="module" src="http://127.0.0.1:5173/@vite/client">
+  <link rel="stylesheet" href="http://127.0.0.1:5173/resources/css/app.css" />
+  <script type="module" src="http://127.0.0.1:5173/resources/js/app.js">
+```
+
+ブラウザはこの URL を取りに行くが:
+
+```
+http://127.0.0.1:5173/@vite/client -> connection refused (nothing is listening)
+```
+
+サーバのログには何も残らず、ステータスも 200。**画面だけが無スタイルで壊れる。**
+
+根拠:
+
+```
+239:  return $this->hotFile ?? public_path('/hot');
+1223: return is_file($this->hotFile());
+```
+
+`isRunningHot()` が true の場合、**manifest は一切読まれない**。だから D
+（hot あり + build 無し）でも 200 が返る。
+
+### `npm run build` はこれを直せない
+
+実測した。
+
+```
+after 'npm run build' with a hot file present: STILL THERE
+```
+
+**ビルドは `public/hot` を削除しない。** 「manifest が無いと言われたら
+`npm run build`」という定番の助言は、このケースに対して無効である。
+`rm public/hot` が要る。
+
+## 再現
+
+```bash
+docker compose build
+docker compose run --rm lab bash vite-manifest.sh          # 6 ケースの再現
+docker compose run --rm lab bash vite-manifest-detail.sh   # 例外の正確な文言
+```

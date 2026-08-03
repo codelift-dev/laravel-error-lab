@@ -1,1 +1,0 @@
-<!doctype html><html><head>@vite(["resources/css/app.css","resources/js/app.js"])</head><body>PROBE OK</body></html>

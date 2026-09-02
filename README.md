@@ -61,6 +61,38 @@ a dev server that is not running. **`npm run build` does not remove
 
 Full write-up: <https://codelift.lb-product.com/en/articles/laravel-vite-manifest-not-found>
 
+## `Target class [X] does not exist.`
+
+Thirteen cases. **`composer dump-autoload` changes the outcome of exactly one
+of them**, and the case it fixes only exists if you ran
+`--classmap-authoritative` first:
+
+| Cause | HTTP | What is actually logged |
+|---|---|---|
+| `'ProbeController@index'` — bare name | 500 | `Target class [ProbeController] does not exist.` |
+| `'App\Http\Controllers\ProbeController@index'` | **200** | the string form still works, fully qualified |
+| `namespace` inside the file is wrong | 500 | **`Cannot redeclare class ...`** — a different error |
+| file name vs class name differ in case | 500 | `Target class ... does not exist.` — **Linux only** |
+| new file, autoloader never regenerated | **200** | nothing; the regeneration is not needed |
+| new file after `--classmap-authoritative` | 500 | `Target class ... does not exist.` |
+| constructor needs an unbound interface | 500 | **`Target [...] is not instantiable`** — different again |
+| `route:cache` predates a controller rename | 500 | `Target class [the old name] does not exist.` |
+
+The last one is the one that reaches production. `route:cache` bakes the
+controller's fully-qualified name into `bootstrap/cache/routes-v7.php`, so
+after a rename **the message names a class that exists nowhere in the code**.
+`composer dump-autoload` does not fix it — measured, not assumed.
+`php artisan route:clear` does.
+
+Two environment traps had to be removed before any of this could be measured,
+and both silently produced wrong answers first: a host bind mount is
+case-insensitive even inside a Linux container, which neutralised the
+case-mismatch cause entirely, and with `APP_DEBUG=true` the PHP built-in
+server drops the connection instead of rendering the error page. Both are
+written up in [VERIFICATION.md](VERIFICATION.md).
+
+Full write-up: <https://codelift.lb-product.com/en/articles/laravel-target-class-does-not-exist>
+
 ## Run it
 
 ```bash
@@ -69,13 +101,15 @@ docker compose run --rm lab bash 419-page-expired.sh      # reproduce every 419 
 docker compose run --rm lab bash 419-diagnose.sh          # classify every 419 cause
 docker compose run --rm lab bash vite-manifest.sh         # reproduce every Vite case
 docker compose run --rm lab bash vite-manifest-detail.sh  # exact exception text
+docker compose run --rm lab bash target-class.sh          # reproduce every Target class case
 ```
 
 Nothing is installed on the host. The server and the client both run inside
 the container, so there are no port collisions and no host PHP involved.
 
-Verified against Laravel **13.21.1** / PHP 8.4.23 (419) and Laravel **13.23.0**
-/ PHP 8.4.24 / Node 22.23.2 (Vite). Details, and the harness bug that briefly
+Verified against Laravel **13.21.1** / PHP 8.4.23 (419), Laravel **13.23.0** /
+PHP 8.4.24 / Node 22.23.2 (Vite), and Laravel **13.30.1** / PHP 8.4.25 /
+Composer 2.10.3 (Target class). Details, and the harness bug that briefly
 produced two wrong conclusions: [VERIFICATION.md](VERIFICATION.md).
 
 ---

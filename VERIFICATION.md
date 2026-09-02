@@ -221,3 +221,88 @@ docker compose build
 docker compose run --rm lab bash vite-manifest.sh          # 6 ケースの再現
 docker compose run --rm lab bash vite-manifest-detail.sh   # 例外の正確な文言
 ```
+
+---
+
+# Laravel `Target class [X] does not exist.` 検証記録
+
+実施日: 2026-09-02
+実行環境: Docker Desktop / `php:8.4-cli-bookworm` / Laravel 13.30.1 / PHP 8.4.25 / Composer 2.10.3
+**アプリはコンテナ内 `/build` に作る**（理由は「環境が結論を消していた」を参照）
+
+## 結果一覧
+
+| ケース | 条件 | HTTP | ログに出た例外 |
+|---|---|---|---|
+| A | `[Class::class, 'method']`（正常系） | **200** | — |
+| B | `'ProbeController@index'`（名前空間なし文字列） | 500 | `Target class [ProbeController] does not exist.` |
+| C | `'App\Http\Controllers\ProbeController@index'` | **200** | — |
+| D | ファイルの `namespace` がディレクトリと不一致 | 500 | **`Cannot redeclare class ...`**（`FatalError`） |
+| E | ファイル名とクラス名が大文字小文字だけ違う | 500 | `Target class [...] does not exist.` |
+| F | 新規ファイル。`composer dump-autoload` 未実行 | **200** | — |
+| G | `--classmap-authoritative` の後に新規ファイル追加 | 500 | `Target class [...] does not exist.` |
+| H | G の状態で `composer dump-autoload` | **200** | — |
+| I | コンストラクタが未バインドの interface を要求 | 500 | **`Target [...] is not instantiable while building [...]`** |
+| J | コンストラクタが存在しないクラスを要求 | 500 | `Target class [...] does not exist.` |
+| K | `route:cache` 後にコントローラをリネーム | 500 | `Target class [旧名] does not exist.` |
+| L | K の状態で `composer dump-autoload` | **500（変わらず）** | 同上 |
+| M | K の状態で `php artisan route:clear` | **200** | — |
+
+## 観察
+
+**1. `composer dump-autoload` が効くのは G だけ。**
+F が 200 である以上、新しいクラスファイルを置いただけなら再生成は要らない。
+G は `--classmap-authoritative`（本番デプロイの定番オプション）を打った後に
+ファイルを足した場合で、このときだけ再生成が必要になる。
+
+**2. K・L・M が実務で一番刺さる。**
+`route:cache` はコントローラの FQCN を `bootstrap/cache/routes-v7.php` に焼き込む。
+リネーム後もキャッシュが古い名前を持ち続けるので、**エラーメッセージはコードの
+どこにも存在しないクラス名を指す**。`composer dump-autoload` では直らない（L）。
+`route:clear` で直る（M）。
+
+**3. 名前空間の書き間違いは、この例外を出さない。**
+D は `Cannot redeclare class` という別物の致命的エラーになる。ログに出たのは
+この 1 件のみ（他のメッセージは無し）。PSR-4 が正しいパスのファイルを読み、
+そこに別のクラスが宣言されていて、目的のクラスは見つからないまま同じファイルが
+もう一度 include されるため。
+
+**4. `is not instantiable` は別の話。**
+I は interface が存在しないのではなく、**バインドが無い**。文字列も違う。
+この 2 つを混同したまま「Target class」で検索すると解決しない。
+
+**5. 文字列でのアクション指定は死んでいない。**
+C が 200。壊れるのは B（名前空間を省いた形）だけで、完全修飾すれば動く。
+Laravel 11 で `RouteServiceProvider` が消えたので `$namespace` を書き戻す
+場所自体が無く、「コメントアウトを外す」という定番の助言は実行不可能。
+
+## 環境が結論を消していた
+
+最初の実行はアプリを `/lab`（ホストからの bind mount）に作っていた。
+**Windows / macOS ホストの bind mount は、コンテナが Linux でも大文字小文字を
+区別しない。** その結果 E が 200 になり、
+
+```
+class_exists("App\Http\Controllers\ProbeController")  => true
+ReflectionClass::getFileName()  => .../ProbeController.php   ← 存在しないファイル
+```
+
+という状態になっていた。実在するのは `Probecontroller.php` だけである。
+**この scenario の目玉である「Linux でだけ落ちる原因」を、環境そのものが
+無効化していた。** アプリをコンテナ内 `/build` に移して再取得した。
+
+## もう 1 つの落とし穴 — `APP_DEBUG=true` だと計測できない
+
+失敗ケースが全て `HTTP 000` になり、アクセスログにも残らず、以降のリクエストも
+全滅した。アプリが落ちているように見えるが、実際は **PHP ビルトインサーバ
+（`artisan serve` でも素の `php -S` でも）がデバッグ画面の描画中に接続を切っている**。
+`APP_DEBUG=false` にすると同じケースが素直に 500 を返す。
+本番はそもそも `APP_DEBUG=false` なので、記録した値は本番の挙動でもある。
+
+## 再現
+
+```bash
+docker compose build
+docker compose run --rm lab bash target-class.sh
+```
+

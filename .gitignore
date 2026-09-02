@@ -2,3 +2,5 @@
 # It is an output of the reproduction, not an input to it.
 work/app419/
 work/vite-app/
+# target-class.sh builds its app in /build inside the container, not here.
+work/target-app/

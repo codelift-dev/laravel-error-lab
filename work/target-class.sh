@@ -271,6 +271,38 @@ start_server
 measure "M. after php artisan route:clear" /probe
 stop_server
 
+echo "########## 6. a new autoload mapping, not just a new file ##########"
+# Added 2026-10-14. F showed that a new file under the EXISTING App\ mapping
+# needs no regeneration, and the first version of the article stretched that
+# into "if the classmap is not authoritative, the autoloader is not the
+# cause". An external review pointed out that Composer's own documentation
+# says the opposite for a different case: adding a mapping to composer.json
+# requires a regenerated autoloader. N and O measure that case.
+reset_app
+cp composer.json /tmp/composer.json.bak
+php -r '
+$c = json_decode(file_get_contents("composer.json"), true);
+$c["autoload"]["psr-4"]["Modules\\"] = "modules/";
+file_put_contents("composer.json", json_encode($c, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES)."\n");'
+mkdir -p modules/Probe
+printf '%s\n' '<?php' '' 'namespace Modules\Probe;' '' 'class ProbeController' '{' \
+  '    public function index(): string' '    {' "        return 'PROBE OK';" '    }' '}' \
+  > modules/Probe/ProbeController.php
+route_to 'Modules\Probe\ProbeController'
+echo "  composer.json gained \"Modules\\\\\": \"modules/\"; composer dump-autoload NOT run"
+echo "  authoritative: $(grep -c 'setClassMapAuthoritative(true)' vendor/composer/autoload_real.php)"
+start_server
+measure "N. new PSR-4 mapping, autoloader not regenerated" /probe
+stop_server
+echo "  running: composer dump-autoload"
+composer dump-autoload --quiet
+start_server
+measure "O. same, after composer dump-autoload" /probe
+stop_server
+cp /tmp/composer.json.bak composer.json
+rm -rf modules
+composer dump-autoload --quiet
+
 reset_app
 rm -f app/Http/Controllers/ProbeRenamedController.php
 sed -i 's/^APP_DEBUG=.*/APP_DEBUG=true/' .env

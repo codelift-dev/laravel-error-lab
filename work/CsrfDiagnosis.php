@@ -77,12 +77,19 @@ class CsrfDiagnosis
      */
     public static function explain(Request $request): string
     {
+        // All three places Laravel accepts a token from. X-XSRF-TOKEN is the
+        // one Axios sends on its own — copied from the XSRF-TOKEN cookie — so
+        // it is how every Inertia request arrives. The first version checked
+        // only the other two and reported every Axios failure, expired
+        // sessions included, as "no token submitted". Fixed 2026-10-14.
         $submitted = $request->input('_token') !== null
-            || $request->header('X-CSRF-TOKEN') !== null;
+            || $request->header('X-CSRF-TOKEN') !== null
+            || $request->header('X-XSRF-TOKEN') !== null;
 
         if (! $submitted) {
-            return 'NO_TOKEN_SUBMITTED: the form is missing @csrf, or the '
-                .'AJAX call omits the X-CSRF-TOKEN header';
+            return 'NO_TOKEN_SUBMITTED: no _token field, X-CSRF-TOKEN header '
+                .'or X-XSRF-TOKEN header — the form is missing @csrf, or the '
+                .'client sends none of them';
         }
 
         $facts = $request->attributes->get(self::ATTRIBUTE);

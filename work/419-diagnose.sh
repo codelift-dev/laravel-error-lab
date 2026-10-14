@@ -28,7 +28,7 @@ start_server() {
   php artisan route:clear >/dev/null 2>&1
   php artisan serve --host=127.0.0.1 --port=8000 >/tmp/serve.log 2>&1 &
   SERVER_PID=$!
-  for _ in $(seq 1 40); do curl -s -o /dev/null "$BASE/form" && return 0; sleep 0.25; done
+  for _ in $(seq 1 240); do curl -s -o /dev/null --max-time 5 "$BASE/form" && return 0; sleep 0.25; done
   echo "server failed to start"; cat /tmp/serve.log; exit 1
 }
 stop_server() {
@@ -77,6 +77,42 @@ start_server
 T=$(get_token /tmp/d5)
 find storage/framework/sessions -type f -exec touch -d '10 minutes ago' {} \;
 show "expect SESSION_GONE" "$(curl -s -b /tmp/d5 -X POST "$BASE/form" -d "_token=$T" -d 'payload=x')"
+stop_server
+sed -i 's/^SESSION_LIFETIME=.*/SESSION_LIFETIME=120/' .env
+
+echo
+echo "############ the same causes, sent the way Axios sends them ############"
+# Laravel's own resources/js/bootstrap.js uses Axios, and Axios does not send
+# _token or X-CSRF-TOKEN. It copies the XSRF-TOKEN cookie into an
+# X-XSRF-TOKEN header — so this is how every Inertia request arrives. Added
+# 2026-10-14 after an external review pointed out that explain() never looked
+# at this header and would call all of these "no token submitted".
+#
+# None of these requests carries an Origin or Sec-Fetch-Site header, so the
+# Laravel 13 same-origin shortcut does not apply and the token is checked.
+xsrf() {  # the cookie value, URL-decoded exactly as Axios decodes it
+  awk '$6=="XSRF-TOKEN"{print $7}' "$1" | tail -1 | php -r 'echo urldecode(trim(stream_get_contents(STDIN)));'
+}
+echo
+
+echo "X1. X-XSRF-TOKEN only, session alive (control)"
+start_server
+rm -f /tmp/x1; curl -s -c /tmp/x1 -o /dev/null "$BASE/form"
+printf '  %-28s %s\n' "expect ACCEPTED" \
+  "$(curl -s -b /tmp/x1 -c /tmp/x1 -H "X-XSRF-TOKEN: $(xsrf /tmp/x1)" -X POST "$BASE/form" -d 'payload=x')"
+
+echo "X2. X-XSRF-TOKEN only, token from another session"
+rm -f /tmp/x2a /tmp/x2b
+curl -s -c /tmp/x2a -o /dev/null "$BASE/form"; curl -s -c /tmp/x2b -o /dev/null "$BASE/form"
+show "expect TOKEN_MISMATCH" "$(curl -s -b /tmp/x2b -H "X-XSRF-TOKEN: $(xsrf /tmp/x2a)" -X POST "$BASE/form" -d 'payload=x')"
+stop_server
+
+echo "X3. X-XSRF-TOKEN only, session expired server-side"
+sed -i 's/^SESSION_LIFETIME=.*/SESSION_LIFETIME=1/' .env
+start_server
+rm -f /tmp/x3; curl -s -c /tmp/x3 -o /dev/null "$BASE/form"
+find storage/framework/sessions -type f -exec touch -d '10 minutes ago' {} \;
+show "expect SESSION_GONE" "$(curl -s -b /tmp/x3 -H "X-XSRF-TOKEN: $(xsrf /tmp/x3)" -X POST "$BASE/form" -d 'payload=x')"
 stop_server
 sed -i 's/^SESSION_LIFETIME=.*/SESSION_LIFETIME=120/' .env
 

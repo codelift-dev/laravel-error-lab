@@ -39,6 +39,12 @@ both were discovered by getting them wrong first:
 Copy `work/CsrfDiagnosis.php` and `work/DiagnoseCsrf.php` into an application
 as-is; `work/install-diagnosis.php` shows the registration.
 
+**Fixed 2026-10-14:** the first version decided "was a token sent?" from
+`_token` and `X-CSRF-TOKEN` only, and missed `X-XSRF-TOKEN` — the header Axios
+sends, and so the way every Inertia request arrives. An expired session in an
+Inertia app was reported as `NO_TOKEN_SUBMITTED`. `419-diagnose.sh` now replays
+the Axios-style cases too (X1–X3), and they classify correctly.
+
 Full write-up: <https://codelift.lb-product.com/en/articles/laravel-419-page-expired-diagnosis>
 
 ## `Vite manifest not found`
@@ -63,9 +69,11 @@ Full write-up: <https://codelift.lb-product.com/en/articles/laravel-vite-manifes
 
 ## `Target class [X] does not exist.`
 
-Thirteen cases. **`composer dump-autoload` changes the outcome of exactly one
-of them**, and the case it fixes only exists if you ran
-`--classmap-authoritative` first:
+Fifteen cases. **`composer dump-autoload` changes the outcome of two of them**:
+a new file after `--classmap-authoritative`, and a new PSR-4 mapping added to
+`composer.json` (authoritative or not). A new file under an existing mapping
+needs no regeneration. The mapping case was added on 2026-10-14 after an
+external review showed the first version over-generalised from thirteen cases:
 
 | Cause | HTTP | What is actually logged |
 |---|---|---|
@@ -77,6 +85,7 @@ of them**, and the case it fixes only exists if you ran
 | new file after `--classmap-authoritative` | 500 | `Target class ... does not exist.` |
 | constructor needs an unbound interface | 500 | **`Target [...] is not instantiable`** — different again |
 | `route:cache` predates a controller rename | 500 | `Target class [the old name] does not exist.` |
+| new PSR-4 mapping in `composer.json`, not regenerated | 500 | `Target class ... does not exist.` — fixed by `dump-autoload` |
 
 The last one is the one that reaches production. `route:cache` bakes the
 controller's fully-qualified name into `bootstrap/cache/routes-v7.php`, so

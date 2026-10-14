@@ -306,3 +306,36 @@ docker compose build
 docker compose run --rm lab bash target-class.sh
 ```
 
+---
+
+# 2026-10-14 追補 — 外部レビューを受けた 2 件の訂正
+
+## 419 診断: `X-XSRF-TOKEN` を見ていなかった
+
+`CsrfDiagnosis::explain()` は送信有無を `_token` と `X-CSRF-TOKEN` だけで判定していた。
+Laravel はもう 1 つ `X-XSRF-TOKEN`（`XSRF-TOKEN` Cookie を暗号化したまま返すヘッダ）を受け付け、
+Axios はこれを自動で送る。修正前後で同じケースを流した（Laravel 13.21.1）。
+
+| ケース | 期待 | 修正前 | 修正後 |
+|---|---|---|---|
+| X1 `X-XSRF-TOKEN` のみ・正常 | ACCEPTED | ACCEPTED | ACCEPTED |
+| X2 `X-XSRF-TOKEN` のみ・別セッション | TOKEN_MISMATCH | **NO_TOKEN_SUBMITTED** | TOKEN_MISMATCH |
+| X3 `X-XSRF-TOKEN` のみ・期限切れ | SESSION_GONE | **NO_TOKEN_SUBMITTED** | SESSION_GONE |
+
+B/D/E/F/G/A の 6 ケースは修正後も全て一致。どのリクエストも `Origin` / `Sec-Fetch-Site` を
+付けていないので、Laravel 13 の同一オリジン省略は働かず、トークン照合が必ず走る条件で測っている。
+
+付随: Laravel 13.21.1 のアプリが bind mount 上で初回応答まで 10 秒を超えることがあり、
+起動待ちを 10 秒 → 最大 60 秒に延ばした。結果には影響しない。
+
+## Target class: 「authoritative でなければ autoloader は無関係」は言い過ぎだった
+
+F（既存 `App\` の下にファイル追加）から一般化していた。`composer.json` に対応を**追加**した場合を測った。
+
+| ケース | 条件 | HTTP | 例外 |
+|---|---|---|---|
+| N | `"Modules\\": "modules/"` を追加、再生成なし（authoritative: 0） | 500 | `Target class [Modules\Probe\ProbeController] does not exist.` |
+| O | N の後に `composer dump-autoload` | 200 | — |
+
+A〜M は同日に再実行し、2026-09-02 と同じ結果。記事の `grep -c setClassMapAuthoritative` も
+plain=0 / `--classmap-authoritative`=1 / `--optimize`=0 で判別できることを確認した。
